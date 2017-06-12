@@ -17,13 +17,19 @@ import (
 // Image Authorization Plugin struct definition
 type ImgAuthZPlugin struct {
 	// Docker client
-	client                  *dockerclient.Client
+	client *dockerclient.Client
 	// Map of authorized registries
-	authorizedRegistries    map[string]bool
+	authorizedRegistries map[string]bool
 	// Number of authorized registries
 	numAuthorizedRegistries int
 	// List of authorized registries as string
-	authRegistriesAsString  string
+	authRegistriesAsString string
+	// Map of authorized images
+	authorizedImages map[string]bool
+	// Number of authorized registries
+	numAuthorizedImages int
+	// List of authorized registries as string
+	authImagesAsString string
 }
 
 // Returns the list of authorized registries as string
@@ -35,9 +41,17 @@ func authRegistries(m map[string]bool) string {
 	return strings.Join(keys, ", ")
 }
 
+// Returns the list of authorized images as string
+func authImages(m map[string]bool) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return strings.Join(keys, ", ")
+}
 
 // Create a new image authorization plugin
-func newPlugin(dockerHost string, registries map[string]bool) (*ImgAuthZPlugin, error) {
+func newPlugin(dockerHost string, registries map[string]bool, images map[string]bool) (*ImgAuthZPlugin, error) {
 	client, err := dockerclient.NewClient(dockerHost, dockerapi.DefaultVersion, nil, nil)
 
 	if err != nil {
@@ -45,49 +59,60 @@ func newPlugin(dockerHost string, registries map[string]bool) (*ImgAuthZPlugin, 
 	}
 
 	return &ImgAuthZPlugin{
-		client: client,
+		client:                  client,
 		authorizedRegistries:    registries,
+		authorizedImages:        images,
 		numAuthorizedRegistries: len(registries),
-		authRegistriesAsString:  authRegistries(registries)}, nil
+		numAuthorizedImages:     len(images),
+		authRegistriesAsString:  authRegistries(registries),
+		authImagesAsString:      authImages(images)}, nil
 }
 
-// Returns true if there are any authorized registries configured. 
+// Returns true if there are any authorized registries configured.
 // Otherwise, returns false
 func (plugin *ImgAuthZPlugin) hasAuthorizedRegistries() bool {
 	return (plugin.numAuthorizedRegistries > 0)
 }
 
+// Returns true if there are any authorized images configured.
+// Otherwise, returns false
+func (plugin *ImgAuthZPlugin) hasAuthorizedImages() bool {
+	return (plugin.numAuthorizedImages > 0)
+}
+
 // Parses the docker client command to determine the requested registry used in the command.
 // If a registry is used in the command (i.e. docker pull or docker run commands), then the registry url and true is returned.
 // Otherwise, returns empty string and false.
-func (plugin *ImgAuthZPlugin) getRequestedRegistry(req authorization.Request, reqURL *url.URL) (string, bool) {
+func (plugin *ImgAuthZPlugin) processRequest(req authorization.Request, reqURL *url.URL) (string, string, bool) {
 
-	image := ""
 	registry := ""
+	imagePath := ""
+	image := ""
 
 	// docker run
 	if strings.HasSuffix(reqURL.Path, "/containers/create") {
 		var config dockercontainer.Config
 		json.Unmarshal(req.RequestBody, &config)
-		image = config.Image
+		imagePath = config.Image
 	}
 
 	// docker pull
 	if strings.HasSuffix(reqURL.Path, "/images/create") {
-		image = reqURL.Query().Get("fromImage")
+		imagePath = reqURL.Query().Get("fromImage")
 	}
 
-	if len(image) > 0 {
+	if len(imagePath) > 0 {
 		// If no registry is specfied, assume it is the dockerhub!
 		registry = "library"
-		idx := strings.Index(image, "/")
+		idx := strings.Index(imagePath, "/")
 		if idx != -1 {
-			registry = image[0:idx]
+			registry = imagePath[0:idx]
+			image = imagePath[idx:]
 		}
-		return registry, true
+		return registry, image, true
 	}
 
-	return registry, false
+	return registry, image, false
 }
 
 // Authorizes the docker client command.
@@ -100,7 +125,7 @@ func (plugin *ImgAuthZPlugin) AuthZReq(req authorization.Request) authorization.
 	reqURL, _ := url.ParseRequestURI(reqURI)
 
 	// Find out the requested registry and whether or not a registry is present in the client command
-	requestedRegistry, isRegistryCommand := plugin.getRequestedRegistry(req, reqURL)
+	requestedRegistry, requestedImage, isRegistryCommand := plugin.processRequest(req, reqURL)
 
 	// Docker command do not involve registries
 	if isRegistryCommand == false {
@@ -116,10 +141,18 @@ func (plugin *ImgAuthZPlugin) AuthZReq(req authorization.Request) authorization.
 		return authorization.Response{Allow: false, Msg: "No authorized registries configured"}
 	}
 
+	if plugin.hasAuthorizedImages() == false {
+		log.Println("[DENIED] No authorized images", req.RequestMethod, reqURL.String())
+		return authorization.Response{Allow: false, Msg: "No authorized images configured"}
+	}
+
 	// Verify that registry requested is authorized
-	if plugin.authorizedRegistries[requestedRegistry] == true {
+	registryAuthorized := plugin.authorizedRegistries[requestedRegistry]
+	imageAuthorized := plugin.authorizedImages[requestedImage]
+
+	if registryAuthorized && imageAuthorized {
 		// Is an authorized registry: Allow!
-		log.Println("[ALLOWED] Registry:", requestedRegistry, req.RequestMethod, reqURL.String())
+		log.Println("[ALLOWED] Registry:"+requestedRegistry+", Image: "+requestedImage, req.RequestMethod, reqURL.String())
 		return authorization.Response{Allow: true}
 	}
 

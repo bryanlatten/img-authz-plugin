@@ -19,6 +19,7 @@ const (
 var (
 	flDockerHost         = flag.String("host", defaultDockerHost, "Specifies the host where docker daemon is running")
 	authorizedRegistries stringslice
+	authorizedImages     stringslice
 	Version              string
 	Build                string
 )
@@ -29,6 +30,7 @@ func main() {
 
 	// Fetch the registry cmd line options
 	flag.Var(&authorizedRegistries, "registry", "Specifies the authorized image registries")
+	flag.Var(&authorizedImages, "image", "Specifies the authorized images")
 	flag.Parse()
 
 	// Convert authorized registries into a map for efficient lookup
@@ -39,8 +41,17 @@ func main() {
 	}
 	log.Println("No. of authorized registries: ", len(registries))
 
+	// Convert authorized registries into a map for efficient lookup
+	images := make(map[string]bool)
+	for _, image := range authorizedImages {
+		log.Println("Authorized image:", image)
+		images[image] = true
+	}
+
+	log.Println("No. of authorized images: ", len(images))
+
 	// Create image authorization plugin
-	plugin, err := newPlugin(*flDockerHost, registries)
+	plugin, err := newPlugin(*flDockerHost, registries, images)
 	if err != nil {
 		log.Fatal(err)
 	}

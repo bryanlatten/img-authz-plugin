@@ -4,10 +4,11 @@
 DESCRIPTION="Docker Image Authorization Plugin"
 SERVICE=img-authz-plugin
 SERVICEINSTALLDIR=/usr/libexec
+SOURCEDIR=src/main/
 SERVICESOCKETFILE=${SERVICE}.socket
 SERVICECONFIGFILE=${SERVICE}.service
+PLUGINCONFIGFILE=${SOURCEDIR}/config.json
 SYSTEMINSTALLDIR=/usr/lib/systemd/system
-SOURCEDIR=src/main/
 SOURCES := $(shell find $(SOURCEDIR) -name '*.go')
 REGISTRIES := ""
 AUTH_REGISTRIES=$(shell echo $(REGISTRIES)  | sed 's/^\s*/--registry /g' | sed 's/\s*,\s*/ --registry /g' | sed 's/^\s*--registry\s*$$//g' )
@@ -36,7 +37,7 @@ config: $(SERVICESOCKETFILE) $(SERVICECONFIGFILE)
 
 # Generate the socket file
 .PHONY: $(SERVICESOCKETFILE)
-$(SERVICESOCKETFILE): 
+$(SERVICESOCKETFILE):
 	@echo -n "" > ${SERVICESOCKETFILE}
 	@echo "[Unit]" >> ${SERVICESOCKETFILE}
 	@echo "Description=${DESCRIPTION} Socket" >> ${SERVICESOCKETFILE}
@@ -69,6 +70,7 @@ install:
 	@cp -f ${SERVICE} ${SERVICEINSTALLDIR}
 	@cp -f ${SERVICESOCKETFILE} ${SYSTEMINSTALLDIR}
 	@cp -f ${SERVICECONFIGFILE} ${SYSTEMINSTALLDIR}
+	@cp -f ${PLUGINCONFIGFILE} ${SYSTEMINSTALLDIR}
 
 # Uninstalls the service binary and the service config files
 .PHONY: uninstall
@@ -76,6 +78,7 @@ uninstall:
 	@rm -f ${SERVICEINSTALLDIR}/${SERVICE}
 	@rm -f ${SYSTEMINSTALLDIR}/${SERVICESOCKETFILE}
 	@rm -f ${SYSTEMINSTALLDIR}/${SERVICECONFIGFILE}
+	@cp -f ${SYSTEMINSTALLDIR}/config.json
 
 # Removes the generated service config and binary files
 .PHONY: clean
